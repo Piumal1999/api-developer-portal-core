@@ -981,6 +981,29 @@ function filterAllowedAPIs(searchResults, allowedAPIs) {
     return searchResults;
 }
 
+function normalizeStringArray(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value
+        .filter(item => item !== undefined && item !== null && String(item).trim() !== '')
+        .map(item => String(item));
+}
+
+function resolveApiType(apiType) {
+    if (!apiType || typeof apiType !== 'string') {
+        return constants.API_TYPE.REST;
+    }
+
+    const resolvedType = apiType.replace(/\s+/g, '').toUpperCase();
+    if (!Object.values(constants.API_TYPE).includes(resolvedType)) {
+        throw new Sequelize.ValidationError(
+            "Invalid api type. Supported values: REST, WS, GRAPHQL, SOAP, WEBSUB, MCP"
+        );
+    }
+    return resolvedType;
+}
+
 const enforcePortalMode = async (req, res, next) => {
     const orgDetails = await adminDao.getOrganization(req.params.orgName);
     const portalMode = orgDetails.ORG_CONFIG?.devportalMode || constants.DEVPORTAL_MODE.DEFAULT;
@@ -1031,5 +1054,7 @@ module.exports = {
     readDocFiles,
     unzipDirectory,
     filterAllowedAPIs,
-    enforcePortalMode
+    enforcePortalMode,
+    normalizeStringArray,
+    resolveApiType
 }
