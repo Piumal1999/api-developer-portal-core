@@ -45,12 +45,14 @@ module.exports = {
     },
     API_TYPE: {
         MCP: "MCP",
-        MCP_ONLY: "MCPSERVERSONLY",
-        API_PROXIES: "APISONLY",
-        DEFAULT: "DEFAULT",
         WS: "WS",
         WEBSUB: "WEBSUB",
         GRAPHQL: "GRAPHQL",
+    },
+    DEVPORTAL_MODE: {
+        DEFAULT: "DEFAULT",
+        MCP_ONLY: "MCPSERVERSONLY",
+        API_PROXIES: "APISONLY",
     },
     DOC_TYPES: {
         DOC_ID: 'DOC_',

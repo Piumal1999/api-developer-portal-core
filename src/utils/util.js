@@ -983,11 +983,11 @@ function filterAllowedAPIs(searchResults, allowedAPIs) {
 
 const enforcePortalMode = async (req, res, next) => {
     const orgDetails = await adminDao.getOrganization(req.params.orgName);
-    const portalMode = orgDetails.ORG_CONFIG?.devportalMode || constants.API_TYPE.DEFAULT;
+    const portalMode = orgDetails.ORG_CONFIG?.devportalMode || constants.DEVPORTAL_MODE.DEFAULT;
     const path = req.originalUrl.split('/')[4];
 
-    if ((path.includes('apis') || path.includes('api')) && (portalMode === constants.API_TYPE.DEFAULT || portalMode === constants.API_TYPE.API_PROXIES) ||
-        (path.includes('mcps') || path.includes('mcp')) && (portalMode === constants.API_TYPE.DEFAULT || portalMode === constants.API_TYPE.MCP_ONLY)) {
+    if ((path.includes('apis') || path.includes('api')) && (portalMode === constants.DEVPORTAL_MODE.DEFAULT || portalMode === constants.DEVPORTAL_MODE.API_PROXIES) ||
+        (path.includes('mcps') || path.includes('mcp')) && (portalMode === constants.DEVPORTAL_MODE.DEFAULT || portalMode === constants.DEVPORTAL_MODE.MCP_ONLY)) {
         next();
     } else {
         const templateContent = {
