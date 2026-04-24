@@ -36,6 +36,24 @@ const controlPlaneGwUrl = config.controlPlane.gwUrl;
 const { invokeApiRequest } = require('../utils/util');
 const { Sequelize } = require("sequelize");
 const { trackGenerateCredentials, trackSubscribeApi, trackUnsubscribeApi } = require('../utils/telemetry');
+const { publish: publishWebhookEvent } = require('./webhooks/eventPublisher');
+
+async function resolveApiGatewayType(orgId, apiId, transaction) {
+    try {
+        const rows = await apiDao.getAPIMetadata(orgId, apiId, transaction);
+        return (rows && rows[0] && rows[0].GATEWAY_TYPE) || null;
+    } catch (_) {
+        return null;
+    }
+}
+
+async function safePublish(eventType, payload, opts) {
+    try {
+        await publishWebhookEvent(eventType, payload, opts);
+    } catch (err) {
+        logger.warn('[adminService] webhook event publish failed (non-fatal)', { eventType, error: err.message });
+    }
+}
 
 const createOrganization = async (req, res) => {
     logger.info('Initiate organization creation...', req.body);
@@ -945,7 +963,12 @@ const createSubscription = async (req, res) => {
                     t,
                 );
                 if (!existingSubscription || existingSubscription.PAYMENT_STATUS !== "ACTIVE") {
-                    await adminDao.createSubscription(orgID, req.body, t);
+                    const newSub = await adminDao.createSubscription(orgID, req.body, t);
+                    const gwType = await resolveApiGatewayType(orgID, req.body.apiId, t);
+                    await safePublish('subscription.created',
+                        { sub_id: newSub.SUB_ID, api_id: req.body.apiId, policy_id: req.body.policyId },
+                        { transaction: t, orgId: orgID, gatewayType: gwType, aggregateType: 'subscription', aggregateId: newSub.SUB_ID }
+                    );
                 }
                 trackSubscribeApi({
                     orgId: orgID,
@@ -979,7 +1002,12 @@ const createSubscription = async (req, res) => {
                                     t,
                                 );
                                 if (!existingSubAfterConflict || existingSubAfterConflict.PAYMENT_STATUS !== "ACTIVE") {
-                                    await adminDao.createSubscription(orgID, req.body, t);
+                                    const newSubConflict = await adminDao.createSubscription(orgID, req.body, t);
+                                    const gwTypeConflict = await resolveApiGatewayType(orgID, req.body.apiId, t);
+                                    await safePublish('subscription.created',
+                                        { sub_id: newSubConflict.SUB_ID, api_id: req.body.apiId, policy_id: req.body.policyId },
+                                        { transaction: t, orgId: orgID, gatewayType: gwTypeConflict, aggregateType: 'subscription', aggregateId: newSubConflict.SUB_ID }
+                                    );
                                 }
                                 return res.status(200).json({ message: 'Subscribed successfully' });
                             }
@@ -1079,7 +1107,17 @@ const updateSubscription = async (req, res) => {
                         });
                     }
                 }
+                const preUpdateSubs = await adminDao.getAppApiSubscription(orgID, req.body.applicationID, req.body.apiId);
+                const preUpdateSub = preUpdateSubs && preUpdateSubs[0];
                 await adminDao.updateSubscription(orgID, req.body, t);
+                if (preUpdateSub && preUpdateSub.SUB_ID) {
+                    const gwTypeUpdate = await resolveApiGatewayType(orgID, req.body.apiId, t);
+                    await safePublish('subscription.plan_changed',
+                        { sub_id: preUpdateSub.SUB_ID, api_id: req.body.apiId,
+                          old_policy_id: preUpdateSub.POLICY_ID, new_policy_id: req.body.policyId },
+                        { transaction: t, orgId: orgID, gatewayType: gwTypeUpdate, aggregateType: 'subscription', aggregateId: preUpdateSub.SUB_ID }
+                    );
+                }
                 return res.status(201).json({ message: 'Updated subscription successfully' });
             } catch (error) {
                 logger.error('Error occurred while subscribing to API', {
@@ -1199,6 +1237,11 @@ const deleteSubscription = async (req, res) => {
             if (subDeleteResponse === 0) {
                 throw new Sequelize.EmptyResultError("Resource not found to delete");
             } else {
+                const gwTypeDel = await resolveApiGatewayType(orgID, subscription.dataValues.API_ID, t);
+                await safePublish('subscription.deleted',
+                    { sub_id: subID, api_id: subscription.dataValues.API_ID, policy_id: subscription.dataValues.POLICY_ID },
+                    { transaction: t, orgId: orgID, gatewayType: gwTypeDel, aggregateType: 'subscription', aggregateId: subID }
+                );
                 //get subscription reference for control plane
                 const subIDList = await adminDao.getAPISubscriptionReference(orgID, subscription.dataValues.APP_ID, subscription.dataValues.REFERENCE_ID, t);
                 //delete subscription from control plane
@@ -1785,6 +1828,13 @@ const unsubscribeAPI = async (req, res) => {
                     };
                 }
                 await adminDao.deleteSubscription(orgID, subscriptionID, t);
+                if (subscriptionPreTx) {
+                    const gwTypeUnsub = await resolveApiGatewayType(orgID, subscriptionPreTx.API_ID, t);
+                    await safePublish('subscription.deleted',
+                        { sub_id: subscriptionID, api_id: subscriptionPreTx.API_ID, policy_id: subscriptionPreTx.POLICY_ID },
+                        { transaction: t, orgId: orgID, gatewayType: gwTypeUnsub, aggregateType: 'subscription', aggregateId: subscriptionID }
+                    );
+                }
                 trackUnsubscribeApi({
                     orgId: orgID,
                     appId: appID,
@@ -1800,6 +1850,13 @@ const unsubscribeAPI = async (req, res) => {
                         });
                         await handleUnsubscribe(nonSharedToken, sharedToken, orgID, appID, apiReferenceID, t);
                         await adminDao.deleteSubscription(orgID, subscriptionID, t);
+                        if (subscriptionPreTx) {
+                            const gwTypeUnsub404 = await resolveApiGatewayType(orgID, subscriptionPreTx.API_ID, t);
+                            await safePublish('subscription.deleted',
+                                { sub_id: subscriptionID, api_id: subscriptionPreTx.API_ID, policy_id: subscriptionPreTx.POLICY_ID },
+                                { transaction: t, orgId: orgID, gatewayType: gwTypeUnsub404, aggregateType: 'subscription', aggregateId: subscriptionID }
+                            );
+                        }
                         trackUnsubscribeApi({
                             orgId: orgID,
                             appId: appID,
