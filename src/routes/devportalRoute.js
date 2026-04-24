@@ -38,6 +38,7 @@ const constants = require('../utils/constants');
 const config = require('../config/config');
 const platformSubscriptionService = require('../services/platformSubscriptionService');
 const platformApiKeyService = require('../services/platformApiKeyService');
+const webhookAdminController = require('../controllers/webhookAdminController');
 
 const uploadTempDir = path.join(os.tmpdir(), 'devportal');
 fs.mkdirSync(uploadTempDir, { recursive: true });
@@ -232,4 +233,10 @@ router.post('/login', devportalController.login);
 if (config.features?.importApplication?.enabled) {
     router.post('/organizations/:orgId/applications/import', enforceSecuirty(constants.SCOPES.ADMIN),multipartHandler.single('file'), devportalController.importApplications);
 }
+
+// Webhook event admin (admin-only)
+router.get('/organizations/:orgId/admin/events', enforceSecuirty(constants.SCOPES.ADMIN), webhookAdminController.listEvents);
+router.get('/organizations/:orgId/admin/events/:eventId', enforceSecuirty(constants.SCOPES.ADMIN), webhookAdminController.getEvent);
+router.post('/organizations/:orgId/admin/deliveries/:deliveryId/retry', enforceSecuirty(constants.SCOPES.ADMIN), webhookAdminController.retryDelivery);
+
 module.exports = router;

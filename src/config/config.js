@@ -64,6 +64,20 @@ function loadConfig() {
         if (e.DP_OIDC_JWKS_URL)       merged.identityProvider.jwksURL          = e.DP_OIDC_JWKS_URL;
     }
 
+    // Webhook subscriber secrets can also be supplied via env vars:
+    // DP_WEBHOOK_SECRET_<SUBSCRIBER_ID_UPPERCASED_UNDERSCORED>=<secret>
+    // e.g. DP_WEBHOOK_SECRET_WSO2_APIM_PRIMARY for subscriber id "wso2-apim-primary"
+    const subscribers = merged.webhooks && merged.webhooks.subscribers;
+    if (Array.isArray(subscribers)) {
+        for (const sub of subscribers) {
+            if (!sub.id) continue;
+            const envKey = 'DP_WEBHOOK_SECRET_' + sub.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+            if (e[envKey]) sub.secret = e[envKey];
+            const pubKeyEnv = 'DP_WEBHOOK_PUBKEY_' + sub.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+            if (e[pubKeyEnv]) sub.publicKey = e[pubKeyEnv];
+        }
+    }
+
     return merged;
 }
 
