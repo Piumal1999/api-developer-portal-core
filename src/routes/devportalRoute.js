@@ -41,14 +41,14 @@ const apiKeyController = require('../controllers/apiKeyController');
 const apiFlowService = require('../services/apiFlowService');
 const webhookAdminController = require('../controllers/webhookAdminController');
 
-router.post('/organizations', enforceSecuirty(constants.SCOPES.ADMIN), adminService.createOrganization);
+router.post('/organizations', enforceSecuirty(constants.SCOPES.ADMIN), multipartHandler.fields([{ name: 'organization', maxCount: 1 }]), adminService.createOrganization);
 router.get('/organizations', enforceSecuirty(constants.SCOPES.ADMIN), adminService.getOrganizations);
-router.put('/organizations/:orgId', enforceSecuirty(constants.SCOPES.ADMIN), adminService.updateOrganization);
+router.put('/organizations/:orgId', enforceSecuirty(constants.SCOPES.ADMIN), multipartHandler.fields([{ name: 'organization', maxCount: 1 }]), adminService.updateOrganization);
 router.get('/organizations/:orgId', enforceSecuirty(constants.SCOPES.ADMIN), devportalService.getOrganization); // S2S Applied 
 router.delete('/organizations/:orgId', enforceSecuirty(constants.SCOPES.ADMIN), adminService.deleteOrganization);
 
-router.post('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), adminService.createIdentityProvider);
-router.put('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), adminService.updateIdentityProvider);
+router.post('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), multipartHandler.fields([{ name: 'identityProvider', maxCount: 1 }]), adminService.createIdentityProvider);
+router.put('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), multipartHandler.fields([{ name: 'identityProvider', maxCount: 1 }]), adminService.updateIdentityProvider);
 router.get('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), adminService.getIdentityProvider);
 router.delete('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), adminService.deleteIdentityProvider);
 
