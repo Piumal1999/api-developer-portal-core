@@ -29,7 +29,7 @@ const { config } = require('../../config/configLoader');
  *
  * @param {string} eventType      — e.g. "apikey.generated"
  * @param {string|null} gatewayType — value from DP_EVENT.GATEWAY_TYPE
- * @returns {Array<{id,url,secret,publicKey,timeoutMs}>}
+ * @returns {Array<{id,url,secret,publicKeyPath,publicKey,timeoutMs}>}
  */
 function matchSubscribers(eventType, gatewayType) {
     const subscribers = config.webhooks && config.webhooks.subscribers;

@@ -119,17 +119,26 @@ function applyEnvOverrides(config) {
 const config = loadBaseConfig();
 applyEnvOverrides(config);
 
-// Webhook subscriber secrets/keys can be supplied via env vars:
+// Webhook subscriber secrets/key paths can be supplied via env vars:
 // DP_WEBHOOK_SECRET_<SUBSCRIBER_ID_UPPERCASED_UNDERSCORED>=<secret>
-// DP_WEBHOOK_PUBKEY_<SUBSCRIBER_ID_UPPERCASED_UNDERSCORED>=<pem>
+// DP_WEBHOOK_PUBKEY_PATH_<SUBSCRIBER_ID_UPPERCASED_UNDERSCORED>=<path-to-pem-file>
 const webhookSubscribers = config.webhooks && config.webhooks.subscribers;
 if (Array.isArray(webhookSubscribers)) {
     for (const sub of webhookSubscribers) {
         if (!sub.id) continue;
         const envKey = 'DP_WEBHOOK_SECRET_' + sub.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
         if (process.env[envKey]) sub.secret = process.env[envKey];
-        const pubKeyEnv = 'DP_WEBHOOK_PUBKEY_' + sub.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
-        if (process.env[pubKeyEnv]) sub.publicKey = process.env[pubKeyEnv];
+        const pubKeyPathEnv = 'DP_WEBHOOK_PUBKEY_PATH_' + sub.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+        if (process.env[pubKeyPathEnv]) sub.publicKeyPath = process.env[pubKeyPathEnv];
+    }
+
+    for (const sub of webhookSubscribers) {
+        if (!sub.publicKeyPath) continue;
+        try {
+            sub.publicKey = fs.readFileSync(sub.publicKeyPath, 'utf8');
+        } catch (err) {
+            throw new Error(`[configLoader] Failed to read webhook public key for subscriber '${sub.id}' from '${sub.publicKeyPath}': ${err.message}`);
+        }
     }
 }
 
