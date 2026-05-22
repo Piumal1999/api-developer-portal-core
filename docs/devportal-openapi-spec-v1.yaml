@@ -3248,6 +3248,8 @@ components:
         multipart/form-data:
           schema:
             type: object
+            required:
+              - organization
             properties:
               organization:
                 type: string
@@ -3271,6 +3273,8 @@ components:
         multipart/form-data:
           schema:
             type: object
+            required:
+              - organization
             properties:
               organization:
                 type: string
@@ -3283,10 +3287,29 @@ components:
                 organization: org.yaml
     IdentityProviderBody:
       required: true
+      description: >-
+        Identity provider payload. Send JSON or an identity provider YAML file in the
+        `identityProvider` multipart field. When YAML is used, the service reads `metadata.name`
+        as the provider name and all other fields from `spec`.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/IdentityProviderRequest"
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - identityProvider
+            properties:
+              identityProvider:
+                type: string
+                format: binary
+                description: "Identity provider YAML file (kind: IdentityProvider)."
+          examples:
+            yamlFile:
+              summary: Identity provider YAML upload
+              value:
+                identityProvider: idp.yaml
     ProviderBody:
       required: true
       content:

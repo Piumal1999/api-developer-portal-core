@@ -73,6 +73,22 @@ function parseOrganizationFromYamlFile(fileBuffer) {
             `Unknown organization YAML kind '${parsed.kind}'. Expected 'Organization'`
         );
     }
+    const { spec = {} } = parsed;
+    if (spec.labels !== undefined && spec.labels !== null) {
+        if (!Array.isArray(spec.labels) || spec.labels.some(l => typeof l !== 'object' || !l.name)) {
+            throw new Sequelize.ValidationError("Invalid organization YAML: 'spec.labels' must be an array of objects with a 'name' field");
+        }
+    }
+    if (spec.views !== undefined && spec.views !== null) {
+        if (!Array.isArray(spec.views) || spec.views.some(v => typeof v !== 'object' || !v.name)) {
+            throw new Sequelize.ValidationError("Invalid organization YAML: 'spec.views' must be an array of objects with a 'name' field");
+        }
+    }
+    if (spec.identityProvider !== undefined && spec.identityProvider !== null) {
+        if (typeof spec.identityProvider !== 'object' || Array.isArray(spec.identityProvider)) {
+            throw new Sequelize.ValidationError("Invalid organization YAML: 'spec.identityProvider' must be an object");
+        }
+    }
     return mapYamlToOrganization(parsed);
 }
 
@@ -196,13 +212,12 @@ const createOrganization = async (req, res) => {
             logger.info('Default subscription policies created successfully', {
                 orgId
             });
-        });
 
-        // IDP creation runs outside the transaction (DAO does not support transaction param)
-        if (payload.identityProvider) {
-            await adminDao.createIdentityProvider(organization.ORG_ID, payload.identityProvider);
-            logger.info('Identity provider created successfully', { orgId: organization.ORG_ID });
-        }
+            if (payload.identityProvider) {
+                await adminDao.createIdentityProvider(orgId, payload.identityProvider, t);
+                logger.info('Identity provider created successfully', { orgId });
+            }
+        });
 
         const orgCreationResponse = {
             orgId: organization.ORG_ID,
@@ -297,35 +312,42 @@ const updateOrganization = async (req, res) => {
         }
         const payload = req.body;
         payload.orgId = orgId;
-        const [, updatedOrg] = await adminDao.updateOrganization(payload);
-        logger.info('Organization update successful', { orgId });
 
-        // IDP upsert — only if present in payload
-        if (payload.identityProvider) {
-            const existing = await adminDao.getIdentityProvider(orgId);
-            if (existing.length > 0) {
-                await adminDao.updateIdentityProvider(orgId, payload.identityProvider);
-            } else {
-                await adminDao.createIdentityProvider(orgId, payload.identityProvider);
-            }
-            logger.info('Identity provider upserted successfully', { orgId });
-        }
+        let updatedOrg;
+        await sequelize.transaction({ timeout: 60000 }, async (t) => {
+            [, updatedOrg] = await adminDao.updateOrganization(payload, t);
+            logger.info('Organization update successful', { orgId });
 
-        // Labels upsert — only if present in payload
-        if (payload.labels?.length) {
-            for (const label of payload.labels) {
-                await apiDao.updateLabel(orgId, label);
+            // IDP upsert — only if present in payload
+            if (payload.identityProvider) {
+                const existing = await adminDao.getIdentityProvider(orgId);
+                if (existing.length > 0) {
+                    await adminDao.updateIdentityProvider(orgId, payload.identityProvider, t);
+                } else {
+                    await adminDao.createIdentityProvider(orgId, payload.identityProvider, t);
+                }
+                logger.info('Identity provider upserted successfully', { orgId });
             }
-            logger.info('Labels upserted successfully', { orgId });
-        }
 
-        // Views upsert — only if present in payload
-        if (payload.views?.length) {
-            for (const viewDef of payload.views) {
-                await apiDao.updateView(orgId, viewDef.name, viewDef.displayName);
+            // Labels upsert — only if present in payload
+            if (payload.labels?.length) {
+                for (const label of payload.labels) {
+                    await apiDao.updateLabel(orgId, label, t);
+                }
+                logger.info('Labels upserted successfully', { orgId });
             }
-            logger.info('Views upserted successfully', { orgId });
-        }
+
+            // Views upsert — only if present in payload
+            if (payload.views?.length) {
+                for (const viewDef of payload.views) {
+                    const view = await apiDao.updateView(orgId, viewDef.name, viewDef.displayName, t);
+                    if (viewDef.labels?.length) {
+                        await apiDao.replaceViewLabels(orgId, view.dataValues.VIEW_ID, viewDef.labels, t);
+                    }
+                }
+                logger.info('Views upserted successfully', { orgId });
+            }
+        });
 
         res.status(200).json({
             orgId: updatedOrg[0].dataValues.ORG_ID,
