@@ -245,7 +245,7 @@ const updateView = async (orgID, name, displayName, t) => {
             record = await record.update({
                 NAME: name,
                 DISPLAY_NAME: displayName,
-            }); // Update if found
+            }, { transaction: t }); // Update if found
         }
         return record;
     } catch (error) {
@@ -391,7 +391,7 @@ const replaceViewLabels = async (orgID, viewID, labelNames, t) => {
             await addViewLabels(orgID, viewID, labelNames, t);
         }
     } catch (error) {
-        if (error instanceof Sequelize.UniqueConstraintError) {
+        if (error instanceof Sequelize.UniqueConstraintError || error instanceof CustomError) {
             throw error;
         }
         throw new Sequelize.DatabaseError(error);
