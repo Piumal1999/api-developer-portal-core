@@ -593,6 +593,9 @@ const updateSubscriptionPolicy = async (orgID, policyID, policy, t) => {
     // Don’t update primary keys
     delete row.ORG_ID;
     delete row.POLICY_ID;
+    if (!Object.prototype.hasOwnProperty.call(policy, 'refId')) {
+      delete row.REF_ID;
+    }
 
     const [_, updatedRows] = await SubscriptionPolicy.update(row, {
       where: { POLICY_ID: policyID, ORG_ID: orgID },
