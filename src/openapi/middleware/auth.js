@@ -248,10 +248,13 @@ async function authResolver(req, res, next) {
             }
         }
 
-        // 6. No usable credential
-        const err = new Error('Authentication required');
-        err.status = 401;
-        return next(err);
+        // 6. No usable credential — pass through as anonymous so the OpenAPI
+        // validator can enforce security on a per-operation basis. Operations
+        // with `security: []` (public endpoints) will proceed; operations that
+        // declare a security scheme will have their handler invoked by the
+        // validator and throw 401 if req.auth is absent.
+        req.auth = null;
+        return next();
     } catch (err) {
         logger.error('authResolver failed', {
             error: err.message,
