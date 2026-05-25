@@ -37,7 +37,106 @@ const yaml = require('js-yaml');
 const { Sequelize } = require("sequelize");
 const { trackGenerateCredentials, trackSubscribeApi, trackUnsubscribeApi } = require('../utils/telemetry');
 
+function mapYamlToOrganization(parsed) {
+    const { metadata = {}, spec = {} } = parsed;
+    return {
+        orgHandle: metadata.name,
+        orgName: spec.displayName,
+        organizationIdentifier: spec.organizationIdentifier,
+        businessOwner: spec.businessOwner,
+        businessOwnerContact: spec.businessOwnerContact,
+        businessOwnerEmail: spec.businessOwnerEmail,
+        roleClaimName: spec.roleClaimName,
+        organizationClaimName: spec.organizationClaimName,
+        groupsClaimName: spec.groupsClaimName,
+        adminRole: spec.adminRole,
+        subscriberRole: spec.subscriberRole,
+        superAdminRole: spec.superAdminRole,
+        identityProvider: spec.identityProvider || null,
+        labels: spec.labels || null,
+        views: spec.views || null,
+    };
+}
+
+function parseOrganizationFromYamlFile(fileBuffer) {
+    let parsed;
+    try {
+        parsed = yaml.load(fileBuffer.toString(constants.CHARSET_UTF8));
+    } catch (e) {
+        throw new Sequelize.ValidationError(`Invalid organization YAML file: ${e.message}`);
+    }
+    if (!parsed || typeof parsed !== 'object') {
+        throw new Sequelize.ValidationError('Organization YAML file is empty or invalid');
+    }
+    if (parsed.kind !== 'Organization') {
+        throw new Sequelize.ValidationError(
+            `Unknown organization YAML kind '${parsed.kind}'. Expected 'Organization'`
+        );
+    }
+    const { spec = {} } = parsed;
+    if (spec.labels !== undefined && spec.labels !== null) {
+        if (!Array.isArray(spec.labels) || spec.labels.some(l => typeof l !== 'object' || !l.name)) {
+            throw new Sequelize.ValidationError("Invalid organization YAML: 'spec.labels' must be an array of objects with a 'name' field");
+        }
+    }
+    if (spec.views !== undefined && spec.views !== null) {
+        if (!Array.isArray(spec.views) || spec.views.some(v => typeof v !== 'object' || !v.name)) {
+            throw new Sequelize.ValidationError("Invalid organization YAML: 'spec.views' must be an array of objects with a 'name' field");
+        }
+    }
+    if (spec.identityProvider !== undefined && spec.identityProvider !== null) {
+        if (typeof spec.identityProvider !== 'object' || Array.isArray(spec.identityProvider)) {
+            throw new Sequelize.ValidationError("Invalid organization YAML: 'spec.identityProvider' must be an object");
+        }
+    }
+    return mapYamlToOrganization(parsed);
+}
+
+function mapYamlToIdentityProvider(parsed) {
+    const { metadata = {}, spec = {} } = parsed;
+    return {
+        name: metadata.name,
+        issuer: spec.issuer,
+        authorizationURL: spec.authorizationURL,
+        tokenURL: spec.tokenURL,
+        userInfoURL: spec.userInfoURL,
+        clientId: spec.clientId,
+        callbackURL: spec.callbackURL,
+        scope: spec.scope,
+        signUpURL: spec.signUpURL,
+        logoutURL: spec.logoutURL,
+        logoutRedirectURI: spec.logoutRedirectURI,
+        jwksURL: spec.jwksURL,
+        certificate: spec.certificate,
+    };
+}
+
+function parseIdentityProviderFromYamlFile(fileBuffer) {
+    let parsed;
+    try {
+        parsed = yaml.load(fileBuffer.toString(constants.CHARSET_UTF8));
+    } catch (e) {
+        throw new Sequelize.ValidationError(`Invalid identity provider YAML file: ${e.message}`);
+    }
+    if (!parsed || typeof parsed !== 'object') {
+        throw new Sequelize.ValidationError('Identity provider YAML file is empty or invalid');
+    }
+    if (parsed.kind !== 'IdentityProvider') {
+        throw new Sequelize.ValidationError(
+            `Unknown YAML kind '${parsed.kind}'. Expected 'IdentityProvider'`
+        );
+    }
+    return mapYamlToIdentityProvider(parsed);
+}
+
 const createOrganization = async (req, res) => {
+    if (req.files?.organization?.[0]) {
+        try {
+            req.body = parseOrganizationFromYamlFile(req.files.organization[0].buffer);
+        } catch (error) {
+            return util.handleError(res, error);
+        }
+    }
     logger.info('Initiate organization creation...', req.body);
 
     const rules = util.validateOrganization();
@@ -72,21 +171,34 @@ const createOrganization = async (req, res) => {
                 orgName: organization.ORG_NAME
             });
 
-            // create default label
-            const labels = await apiDao.createLabels(organization.ORG_ID, [{ name: 'default', displayName: 'default' }], t);
-            const labelId = labels[0].dataValues.LABEL_ID;
-            logger.info('Default label created successfully', {
-                orgId
-            });
+            // Labels: use YAML-defined if provided, else fall back to default
+            const labelDefs = payload.labels?.length
+                ? payload.labels
+                : [{ name: 'default', displayName: 'default' }];
 
-            //create default view
-            const viewResponse = await apiDao.addView(orgId, { name: 'default', displayName: 'default' }, t);
-            const viewID = viewResponse.dataValues.VIEW_ID;
-            logger.info('Default view created successfully', {
-                orgId
-            });
+            const createdLabels = await apiDao.createLabels(orgId, labelDefs, t);
+            logger.info('Labels created successfully', { orgId });
 
-            await apiDao.addLabel(orgId, labelId, viewID, t);
+            // Build name→ID map for view→label linking
+            const labelMap = {};
+            createdLabels.forEach(l => { labelMap[l.dataValues.NAME] = l.dataValues.LABEL_ID; });
+
+            // Views: use YAML-defined if provided, else fall back to default
+            const viewDefs = payload.views?.length
+                ? payload.views
+                : [{ name: 'default', displayName: 'default', labels: [labelDefs[0].name] }];
+
+            for (const viewDef of viewDefs) {
+                const viewResponse = await apiDao.addView(orgId, viewDef, t);
+                const viewID = viewResponse.dataValues.VIEW_ID;
+                for (const lName of (viewDef.labels || [])) {
+                    const labelId = labelMap[lName];
+                    if (labelId) {
+                        await apiDao.addLabel(orgId, labelId, viewID, t);
+                    }
+                }
+            }
+            logger.info('Views created successfully', { orgId });
             //create default provider
             await adminDao.createProvider(organization.ORG_ID, { name: 'WSO2', providerURL: config.controlPlane.url }, t);
             logger.info('Default provider created successfully', {
@@ -100,6 +212,11 @@ const createOrganization = async (req, res) => {
             logger.info('Default subscription policies created successfully', {
                 orgId
             });
+
+            if (payload.identityProvider) {
+                await adminDao.createIdentityProvider(orgId, payload.identityProvider, t);
+                logger.info('Identity provider created successfully', { orgId });
+            }
         });
 
         const orgCreationResponse = {
@@ -169,6 +286,13 @@ const getAllOrganizations = async () => {
 
 const updateOrganization = async (req, res) => {
     const orgId = req.params.orgId;
+    if (req.files?.organization?.[0]) {
+        try {
+            req.body = parseOrganizationFromYamlFile(req.files.organization[0].buffer);
+        } catch (error) {
+            return util.handleError(res, error);
+        }
+    }
     logger.info('Initiate update organization...', {
         orgId,
         ...req.body
@@ -188,10 +312,43 @@ const updateOrganization = async (req, res) => {
         }
         const payload = req.body;
         payload.orgId = orgId;
-        const [, updatedOrg] = await adminDao.updateOrganization(payload);
-        logger.info('Organization update successful', {
-            orgId
+
+        let updatedOrg;
+        await sequelize.transaction({ timeout: 60000 }, async (t) => {
+            [, updatedOrg] = await adminDao.updateOrganization(payload, t);
+            logger.info('Organization update successful', { orgId });
+
+            // IDP upsert — only if present in payload
+            if (payload.identityProvider) {
+                const existing = await adminDao.getIdentityProvider(orgId);
+                if (existing.length > 0) {
+                    await adminDao.updateIdentityProvider(orgId, payload.identityProvider, t);
+                } else {
+                    await adminDao.createIdentityProvider(orgId, payload.identityProvider, t);
+                }
+                logger.info('Identity provider upserted successfully', { orgId });
+            }
+
+            // Labels upsert — only if present in payload
+            if (payload.labels?.length) {
+                for (const label of payload.labels) {
+                    await apiDao.updateLabel(orgId, label, t);
+                }
+                logger.info('Labels upserted successfully', { orgId });
+            }
+
+            // Views upsert — only if present in payload
+            if (payload.views?.length) {
+                for (const viewDef of payload.views) {
+                    const view = await apiDao.updateView(orgId, viewDef.name, viewDef.displayName, t);
+                    if (viewDef.labels?.length) {
+                        await apiDao.replaceViewLabels(orgId, view.dataValues.VIEW_ID, viewDef.labels, t);
+                    }
+                }
+                logger.info('Views upserted successfully', { orgId });
+            }
         });
+
         res.status(200).json({
             orgId: updatedOrg[0].dataValues.ORG_ID,
             orgName: updatedOrg[0].dataValues.ORG_NAME,
@@ -248,6 +405,13 @@ const deleteOrganization = async (req, res) => {
 
 const createIdentityProvider = async (req, res) => {
     const orgId = req.params.orgId;
+    if (req.files?.identityProvider?.[0]) {
+        try {
+            req.body = parseIdentityProviderFromYamlFile(req.files.identityProvider[0].buffer);
+        } catch (error) {
+            return util.handleError(res, error);
+        }
+    }
     logger.info('Initiate create identity provider...', {
         orgId,
         ...req.body
@@ -282,6 +446,13 @@ const createIdentityProvider = async (req, res) => {
 
 const updateIdentityProvider = async (req, res) => {
     const orgId = req.params.orgId;
+    if (req.files?.identityProvider?.[0]) {
+        try {
+            req.body = parseIdentityProviderFromYamlFile(req.files.identityProvider[0].buffer);
+        } catch (error) {
+            return util.handleError(res, error);
+        }
+    }
     const idpData = req.body;
     logger.info('Initiate update identity provider...', {
         orgId,

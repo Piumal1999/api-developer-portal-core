@@ -121,7 +121,7 @@ const getOrganizations = async () => {
     }
 };
 
-const updateOrganization = async (orgData) => {
+const updateOrganization = async (orgData, t) => {
     let devPortalID = "";
     if (orgData.orgHandle) {
         devPortalID = orgData.orgHandle
@@ -145,7 +145,8 @@ const updateOrganization = async (orgData) => {
             },
             {
                 where: { ORG_ID: orgData.orgId },
-                returning: true
+                returning: true,
+                transaction: t,
             }
         );
         if (updatedRowsCount < 1) {
@@ -177,7 +178,7 @@ const deleteOrganization = async (orgId) => {
     }
 }
 
-const createIdentityProvider = async (orgId, idpData) => {
+const createIdentityProvider = async (orgId, idpData, t) => {
     try {
         const idpResponse = await IdentityProvider.create({
             ORG_ID: orgId,
@@ -194,7 +195,7 @@ const createIdentityProvider = async (orgId, idpData) => {
             ...(idpData.scope && { SCOPE: idpData.scope }),
             ...(idpData.jwksURL && { JWKS_URL: idpData.jwksURL }),
             ...(idpData.certificate && { CERTIFICATE: idpData.certificate })
-        });
+        }, { transaction: t });
         return idpResponse;
     } catch (error) {
         if (error instanceof Sequelize.UniqueConstraintError) {
@@ -204,7 +205,7 @@ const createIdentityProvider = async (orgId, idpData) => {
     }
 }
 
-const updateIdentityProvider = async (orgID, idpData) => {
+const updateIdentityProvider = async (orgID, idpData, t) => {
     try {
         const [updatedRowsCount, idpContent] = await IdentityProvider.update(
             {
@@ -224,10 +225,9 @@ const updateIdentityProvider = async (orgID, idpData) => {
                 ...(idpData.certificate && { CERTIFICATE: idpData.certificate })
             },
             {
-                where: {
-                    ORG_ID: orgID
-                },
-                returning: true
+                where: { ORG_ID: orgID },
+                returning: true,
+                transaction: t,
             }
         );
         if (updatedRowsCount < 1) {

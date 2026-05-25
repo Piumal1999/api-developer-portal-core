@@ -3224,6 +3224,10 @@ components:
             $ref: "#/components/schemas/GenericObject"
     OrganizationCreateBody:
       required: true
+      description: >-
+        Organization creation payload. Send JSON or an organization YAML file in the `organization`
+        multipart field. When YAML is used, the service reads `metadata.name` as `orgHandle` and
+        `spec.displayName` as `orgName`; all other fields are read from `spec`.
       content:
         application/json:
           schema:
@@ -3241,18 +3245,71 @@ components:
             adminRole: admin
             subscriberRole: subscriber
             superAdminRole: superAdmin
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - organization
+            properties:
+              organization:
+                type: string
+                format: binary
+                description: "Organization YAML file (kind: Organization)."
+          examples:
+            yamlFile:
+              summary: Organization YAML upload
+              value:
+                organization: org.yaml
     OrganizationUpdateBody:
       required: true
+      description: >-
+        Organization update payload. Send JSON or an organization YAML file in the `organization`
+        multipart field. When YAML is used, the service reads `metadata.name` as `orgHandle` and
+        `spec.displayName` as `orgName`; all other fields are read from `spec`.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/OrganizationUpdateRequest"
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - organization
+            properties:
+              organization:
+                type: string
+                format: binary
+                description: "Organization YAML file (kind: Organization)."
+          examples:
+            yamlFile:
+              summary: Organization YAML upload
+              value:
+                organization: org.yaml
     IdentityProviderBody:
       required: true
+      description: >-
+        Identity provider payload. Send JSON or an identity provider YAML file in the
+        `identityProvider` multipart field. When YAML is used, the service reads `metadata.name`
+        as the provider name and all other fields from `spec`.
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/IdentityProviderRequest"
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - identityProvider
+            properties:
+              identityProvider:
+                type: string
+                format: binary
+                description: "Identity provider YAML file (kind: IdentityProvider)."
+          examples:
+            yamlFile:
+              summary: Identity provider YAML upload
+              value:
+                identityProvider: idp.yaml
     ProviderBody:
       required: true
       content:
