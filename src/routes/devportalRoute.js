@@ -36,17 +36,18 @@ const { requireCsrfForMutatingApi } = require('../middlewares/csrfProtection');
 const constants = require('../utils/constants');
 const { config } = require('../config/configLoader');
 const platformSubscriptionService = require('../services/platformSubscriptionService');
-const platformApiKeyService = require('../services/platformApiKeyService');
+const apiKeyController = require('../controllers/apiKeyController');
 const apiFlowService = require('../services/apiFlowService');
+const webhookAdminController = require('../controllers/webhookAdminController');
 
-router.post('/organizations', enforceSecuirty(constants.SCOPES.ADMIN), adminService.createOrganization);
+router.post('/organizations', enforceSecuirty(constants.SCOPES.ADMIN), multipartHandler.fields([{ name: 'organization', maxCount: 1 }]), adminService.createOrganization);
 router.get('/organizations', enforceSecuirty(constants.SCOPES.ADMIN), adminService.getOrganizations);
-router.put('/organizations/:orgId', enforceSecuirty(constants.SCOPES.ADMIN), adminService.updateOrganization);
+router.put('/organizations/:orgId', enforceSecuirty(constants.SCOPES.ADMIN), multipartHandler.fields([{ name: 'organization', maxCount: 1 }]), adminService.updateOrganization);
 router.get('/organizations/:orgId', enforceSecuirty(constants.SCOPES.ADMIN), devportalService.getOrganization); // S2S Applied 
 router.delete('/organizations/:orgId', enforceSecuirty(constants.SCOPES.ADMIN), adminService.deleteOrganization);
 
-router.post('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), adminService.createIdentityProvider);
-router.put('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), adminService.updateIdentityProvider);
+router.post('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), multipartHandler.fields([{ name: 'identityProvider', maxCount: 1 }]), adminService.createIdentityProvider);
+router.put('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), multipartHandler.fields([{ name: 'identityProvider', maxCount: 1 }]), adminService.updateIdentityProvider);
 router.get('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), adminService.getIdentityProvider);
 router.delete('/organizations/:orgId/identityProvider', enforceSecuirty(constants.SCOPES.ADMIN), adminService.deleteIdentityProvider);
 
@@ -86,9 +87,9 @@ router.put(
     apiMetadataService.updateAPIMetadata);
 router.delete('/organizations/:orgId/apis/:apiId', enforceSecuirty(constants.SCOPES.DEVELOPER), apiMetadataService.deleteAPIMetadata);
 
-router.post('/organizations/:orgId/subscription-policies', enforceSecuirty(constants.SCOPES.DEVELOPER), apiMetadataService.addSubscriptionPolicies);
+router.post('/organizations/:orgId/subscription-policies', enforceSecuirty(constants.SCOPES.DEVELOPER), multipartHandler.fields([{ name: 'subscriptionPolicy', maxCount: 1 }]), apiMetadataService.addSubscriptionPolicies);
 router.get('/organizations/:orgId/subscription-policies/:policyID', enforceSecuirty(constants.SCOPES.DEVELOPER), apiMetadataService.getSubscriptionPolicy);
-router.put('/organizations/:orgId/subscription-policies', enforceSecuirty(constants.SCOPES.DEVELOPER), apiMetadataService.putSubscriptionPolicies);
+router.put('/organizations/:orgId/subscription-policies', enforceSecuirty(constants.SCOPES.DEVELOPER), multipartHandler.fields([{ name: 'subscriptionPolicy', maxCount: 1 }]), apiMetadataService.putSubscriptionPolicies);
 router.delete('/organizations/:orgId/subscription-policies/:policyName', enforceSecuirty(constants.SCOPES.DEVELOPER), apiMetadataService.deleteSubscriptionPolicy);
 
 const apiZip = multer({ dest: '/tmp' });
@@ -154,15 +155,15 @@ router.put('/organizations/:orgId/api-platform-subscriptions/:subscriptionId',
 router.delete('/organizations/:orgId/api-platform-subscriptions/:subscriptionId',
     enforceSecuirty(constants.SCOPES.DEVELOPER), platformSubscriptionService.deletePlatformGatewaySubscription);
 
-// Platform API keys (CP /platform-api-keys; register /generate before /:apiKeyId)
+// API keys — devportal is source of truth; gateway notified via webhook event
 router.post('/organizations/:orgId/platform-api-keys/generate',
-    enforceSecuirty(constants.SCOPES.DEVELOPER), requireCsrfForMutatingApi, platformApiKeyService.generatePlatformApiKey);
+    enforceSecuirty(constants.SCOPES.DEVELOPER), requireCsrfForMutatingApi, apiKeyController.generateApiKey);
 router.get('/organizations/:orgId/platform-api-keys',
-    enforceSecuirty(constants.SCOPES.DEVELOPER), platformApiKeyService.listPlatformApiKeys);
+    enforceSecuirty(constants.SCOPES.DEVELOPER), apiKeyController.listApiKeys);
 router.post('/organizations/:orgId/platform-api-keys/:apiKeyId/regenerate',
-    enforceSecuirty(constants.SCOPES.DEVELOPER), requireCsrfForMutatingApi, platformApiKeyService.regeneratePlatformApiKey);
+    enforceSecuirty(constants.SCOPES.DEVELOPER), requireCsrfForMutatingApi, apiKeyController.regenerateApiKey);
 router.post('/organizations/:orgId/platform-api-keys/:apiKeyId/revoke',
-    enforceSecuirty(constants.SCOPES.DEVELOPER), requireCsrfForMutatingApi, platformApiKeyService.revokePlatformApiKey);
+    enforceSecuirty(constants.SCOPES.DEVELOPER), requireCsrfForMutatingApi, apiKeyController.revokeApiKey);
 
 //store API subscription
 router.post('/organizations/:orgId/subscriptions', enforceSecuirty(constants.SCOPES.DEVELOPER), adminService.createSubscription);
@@ -265,4 +266,10 @@ router.post('/login', devportalController.login);
 if (config.features?.importApplication?.enabled) {
     router.post('/organizations/:orgId/applications/import', enforceSecuirty(constants.SCOPES.ADMIN),multipartHandler.single('file'), devportalController.importApplications);
 }
+
+// Webhook event admin (admin-only)
+router.get('/organizations/:orgId/events', enforceSecuirty(constants.SCOPES.ADMIN), webhookAdminController.listEvents);
+router.get('/organizations/:orgId/events/:eventId', enforceSecuirty(constants.SCOPES.ADMIN), webhookAdminController.getEvent);
+router.post('/organizations/:orgId/deliveries/:deliveryId/retry', enforceSecuirty(constants.SCOPES.ADMIN), requireCsrfForMutatingApi, webhookAdminController.retryDelivery);
+
 module.exports = router;

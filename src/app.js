@@ -33,6 +33,8 @@ const devportalRoute = require('./routes/devportalRoute');
 const orgContent = require('./routes/orgContentRoute');
 const apiContent = require('./routes/apiContentRoute');
 const applicationContent = require('./routes/applicationsContentRoute');
+const webhookDispatcher = require('./services/webhooks/dispatcher');
+const webhookDeliveryWorker = require('./services/webhooks/deliveryWorker');
 const customContent = require('./routes/customPageRoute');
 const subscriptionsContent = require('./routes/subscriptionsContentRoute');
 const mcpRegistryRoute = require('./routes/mcpRegistryRoute');
@@ -728,7 +730,18 @@ const logStartupInfo = () => {
 
     const visitUrl = config.baseUrl + (config.mode === constants.DEV_MODE ? "/views/default" : "/<organization>/views/default");
     logger.info(`Visit ${visitUrl}`);
-    
+
+    // Start webhook outbox workers
+    try {
+        webhookDispatcher.start();
+        webhookDeliveryWorker.start();
+        logger.info('Webhook dispatcher and delivery worker started');
+    } catch (error) {
+        logger.warn('Could not start webhook workers', {
+            error: error.message,
+            stack: error.stack
+        });
+    }
 };
 
 // Handle Uncaught Exceptions

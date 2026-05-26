@@ -57,7 +57,6 @@ const createAPIMetadata = async (orgID, apiMetadata, t) => {
             SANDBOX_URL: apiMetadata.endPoints.sandboxURL,
             PRODUCTION_URL: apiMetadata.endPoints.productionURL,
             METADATA_SEARCH: apiMetadata,
-            TOKEN_BASED_SUBSCRIPTION_ENABLED: apiMetadata.apiInfo.tokenBasedSubscriptionEnabled || false,
             GATEWAY_TYPE: apiMetadata.apiInfo.gatewayType || null,
             MONETIZATION_ENABLED: apiMetadata.monetizationInfo?.enabled || false,
             ORG_ID: orgID
@@ -117,7 +116,7 @@ const createLabels = async (orgID, labels, t) => {
     }
 }
 
-const updateLabel = async (orgID, label) => {
+const updateLabel = async (orgID, label, t) => {
 
     try {
         let [record, created] = await Labels.findOrCreate({
@@ -129,10 +128,11 @@ const updateLabel = async (orgID, label) => {
                 NAME: label.name,
                 DISPLAY_NAME: label.displayName,
             },
+            transaction: t,
             returning: true
         });
         if (!created) {
-            record = await record.update(label); // Update if found
+            record = await record.update(label, { transaction: t }); // Update if found
         }
         return record;
     } catch (error) {
@@ -245,7 +245,7 @@ const updateView = async (orgID, name, displayName, t) => {
             record = await record.update({
                 NAME: name,
                 DISPLAY_NAME: displayName,
-            }); // Update if found
+            }, { transaction: t }); // Update if found
         }
         return record;
     } catch (error) {
@@ -384,6 +384,20 @@ const addLabel = async (orgID, labelID, viewID, t) => {
     }
 }
 
+const replaceViewLabels = async (orgID, viewID, labelNames, t) => {
+    try {
+        await ViewLabels.destroy({ where: { VIEW_ID: viewID, ORG_ID: orgID }, transaction: t });
+        if (labelNames?.length) {
+            await addViewLabels(orgID, viewID, labelNames, t);
+        }
+    } catch (error) {
+        if (error instanceof Sequelize.UniqueConstraintError || error instanceof CustomError) {
+            throw error;
+        }
+        throw new Sequelize.DatabaseError(error);
+    }
+}
+
 const deleteViewLabels = async (orgID, viewID, labels, t) => {
 
     const IDList = await getLabelID(orgID, labels);
@@ -486,6 +500,7 @@ const buildSubscriptionPolicyRow = (orgID, policy) => {
     BILLING_PLAN: policy.billingPlan,
     DESCRIPTION: policy.description,
     REQUEST_COUNT: requestCount,
+    REF_ID: policy.refId ?? null,
 
     PRICING_MODEL: toUpper(policy.pricingModel) ?? null,
     CURRENCY: policy.currency ?? null,
@@ -593,6 +608,9 @@ const updateSubscriptionPolicy = async (orgID, policyID, policy, t) => {
     // Don’t update primary keys
     delete row.ORG_ID;
     delete row.POLICY_ID;
+    if (!Object.prototype.hasOwnProperty.call(policy, 'refId')) {
+      delete row.REF_ID;
+    }
 
     const [_, updatedRows] = await SubscriptionPolicy.update(row, {
       where: { POLICY_ID: policyID, ORG_ID: orgID },
@@ -1454,7 +1472,6 @@ const updateAPIMetadata = async (orgID, apiID, apiMetadata, t) => {
             SANDBOX_URL: apiMetadata.endPoints.sandboxURL,
             PRODUCTION_URL: apiMetadata.endPoints.productionURL,
             METADATA_SEARCH: apiMetadata,
-            TOKEN_BASED_SUBSCRIPTION_ENABLED: apiMetadata.apiInfo.tokenBasedSubscriptionEnabled || false,
             GATEWAY_TYPE: apiMetadata.apiInfo.gatewayType || null,
             MONETIZATION_ENABLED: apiMetadata.monetizationInfo?.enabled || false,
         }, {
@@ -1895,6 +1912,7 @@ module.exports = {
     getLabels,
     addView,
     addViewLabels,
+    replaceViewLabels,
     deleteViewLabels,
     updateView,
     deleteView,
