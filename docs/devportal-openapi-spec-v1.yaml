@@ -332,11 +332,7 @@ paths:
           $ref: "#/components/responses/TextMessageResponse"
         "404":
           $ref: "#/components/responses/TextMessageResponse"
-      security:
-        - OAuth2Security:
-            - dp:org_content_read
-            - dp:org_content_manage
-            - dp:org_manage
+      security: []
     delete:
       tags:
         - Organization Content
@@ -372,11 +368,7 @@ paths:
       summary: List organization layout assets by file type
       description: Returns all stored organization layout content records for the selected file type and view.
       operationId: getOrgLayoutContentByFileType
-      security:
-        - OAuth2Security:
-            - dp:org_content_read
-            - dp:org_content_manage
-            - dp:org_manage
+      security: []
       responses:
         "200":
           $ref: "#/components/responses/OrganizationContentListResponse"

@@ -16,7 +16,6 @@
  * under the License.
  */
 /* eslint-disable no-undef */
-const configurePassport = require('../middlewares/passport');
 const passport = require('passport');
 const logger = require('../config/logger');
 const { logUserAction } = require('../middlewares/auditLogger');
