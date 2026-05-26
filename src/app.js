@@ -21,7 +21,6 @@ const { engine } = require('express-handlebars');
 const passport = require('passport');
 const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
-const { Pool } = require('pg');
 const path = require('path');
 const http = require('http');
 const https = require('https');
@@ -38,21 +37,18 @@ const webhookDeliveryWorker = require('./services/webhooks/deliveryWorker');
 const customContent = require('./routes/customPageRoute');
 const subscriptionsContent = require('./routes/subscriptionsContentRoute');
 const mcpRegistryRoute = require('./routes/mcpRegistryRoute');
-const { config, secrets: secretConf } = require('./config/configLoader');
+const { config } = require('./config/configLoader');
 const Handlebars = require('handlebars');
 const constants = require("./utils/constants");
 const designRoute = require('./routes/designModeRoute');
 const settingsRoute = require('./routes/configureRoute');
 const apiFlowsRoute = require('./routes/apiFlowsRoute');
-const AsyncLock = require('async-lock');
-const util = require('./utils/util');
-const { registerHelpers } = require('./helpers/handlebarsHelpers');
-
-const OAuth2Strategy = require('passport-oauth2');
-const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const util = require('./utils/util');
+const pool = require('./db/pool');
+const { registerHelpers } = require('./helpers/handlebarsHelpers');
+const { configurePassport } = require('./middlewares/passport');
 
-const lock = new AsyncLock();
 const app = express();
 // const secret = crypto.randomBytes(64).toString('hex');
 const sessionSecret = 'my-secret';
@@ -61,27 +57,6 @@ const filePrefix = config.pathToContent;
 const SERVER_ID = uuidv4();
 
 logger.info(`Starting server with ID: ${SERVER_ID}`);
-
-//PostgreSQL connection pool for session store
-
-if (config.advanced.dbSslDialectOption) {
-    pool = new Pool({
-        user: config.db.username,
-        host: config.db.host,
-        database: config.db.database,
-        password: secretConf.dbSecret,
-        port: config.db.port,
-        ssl: { require: true, rejectUnauthorized: false }
-    });
-} else {
-    pool = new Pool({
-        user: config.db.username,
-        host: config.db.host,
-        database: config.db.database,
-        password: secretConf.dbSecret,
-        port: config.db.port
-    });
-}
 
 app.engine('.hbs', engine({
     extname: '.hbs'
@@ -145,200 +120,7 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 
-let claimNames = {
-    [constants.ROLES.ROLE_CLAIM]: config.roleClaim,
-    [constants.ROLES.GROUP_CLAIM]: config.groupsClaim,
-    [constants.ROLES.ORGANIZATION_CLAIM]: config.orgIDClaim
-};
-// configurePassport(config.identityProvider, claimNames);
-
-if (config.identityProvider?.clientId) {
-const strategy = new OAuth2Strategy({
-    name: 'Asgardeo',
-    issuer: config.identityProvider.issuer,
-    authorizationURL: config.identityProvider.authorizationURL,
-    tokenURL: config.identityProvider.tokenURL,
-    userInfoURL: config.identityProvider.userInfoURL,
-    clientID: config.identityProvider.clientId,
-    callbackURL: config.identityProvider.callbackURL,
-    pkce: true,
-    state: true,
-    logoutURL: process.env.OAUTH2_LOGOUT_ENDPOINT,
-    logoutRedirectURI: process.env.OAUTH2_POST_LOGOUT_REDIRECT_URI,
-    certificate: '',
-    jwksURL: process.env.OAUTH2_JWKS_ENDPOINT,
-    passReqToCallback: true,
-    scope: ['openid', 'profile', 'email'],
-}, async (req, accessToken, refreshToken, params, profile, done) => {
-    if (!accessToken) {
-        return done(new Error('Access token missing'));
-    }
-    let orgList, userOrg;
-    let isAdmin, isSuperAdmin = false;
-    if (config.advanced.tokenExchanger?.enabled) {
-        try {
-            const exchangedToken = await util.tokenExchanger(accessToken, req.session.returnTo.split("/")[1]);
-            const decodedExchangedToken = jwt.decode(exchangedToken);
-            orgList = decodedExchangedToken.organizations;
-            userOrg = decodedExchangedToken.organization.uuid;
-            req['exchangedToken'] = exchangedToken;
-            const exchangeTokenScopes = (decodedExchangedToken?.scope || '').split(' ');
-            isAdmin = exchangeTokenScopes.includes(config.advanced.tokenExchanger.admin_scope || "apim:admin");
-        } catch (error) {
-            logger.error('Token exchange failed during authentication', {
-                error: error.message,
-                returnTo: req.session.returnTo
-            });
-            return done(error);
-        }
-    }
-    const decodedJWT = jwt.decode(params.id_token);
-    const decodedAccessToken = jwt.decode(accessToken);
-    const firstName = decodedJWT['given_name'] || decodedJWT['nickname'];
-    const lastName = decodedJWT['family_name'];
-    const organizationID = decodedJWT[claimNames[constants.ROLES.ORGANIZATION_CLAIM]] ? decodedJWT[config.orgIDClaim] : '';
-    const roles = decodedJWT[claimNames[constants.ROLES.ROLE_CLAIM]] ? decodedJWT[config.roleClaim] : '';
-    const groups = decodedJWT[claimNames[constants.ROLES.GROUP_CLAIM]] ? decodedJWT[config.groupsClaim] : '';
-    if (roles.includes(constants.ROLES.SUPER_ADMIN) || roles.includes(constants.ROLES.ADMIN)) {
-        isAdmin = true;
-    }
-    if (roles.includes(constants.ROLES.SUPER_ADMIN)) {
-        isSuperAdmin = true;
-    }
-    const returnTo = req.session.returnTo;
-    let view = '';
-    if (returnTo) {
-        const startIndex = returnTo.indexOf('/views/') + 7;
-        const endIndex = returnTo.indexOf('/', startIndex) !== -1 ? returnTo.indexOf('/', startIndex) : returnTo.length;
-        view = returnTo.substring(startIndex, endIndex);
-    }
-    let imageURL = "https://raw.githubusercontent.com/wso2/docs-bijira/refs/heads/main/en/devportal-theming/profile.svg";
-    if (decodedJWT['google_pic_url']) {
-        imageURL = decodedJWT['google_pic_url'];
-    } else {
-        imageURL = decodedJWT['picture'] ? decodedJWT['picture'] : imageURL;
-    }
-    profile = {
-        'firstName': firstName ? (firstName.includes(" ") ? firstName.split(" ")[0] : firstName) : '',
-        'lastName': lastName ? lastName : (firstName && firstName.includes(" ") ? firstName.split(" ")[1] : ''),
-        'view': view,
-        'idToken': params.id_token,
-        'email': decodedJWT['email'] || req.session.username,
-        [constants.ROLES.ORGANIZATION_CLAIM]: organizationID,
-        'returnTo': req.session.returnTo,
-        accessToken,
-        refreshToken,
-        'authorizedOrgs': orgList,
-        'exchangeToken': req.exchangedToken,
-        [constants.ROLES.ROLE_CLAIM]: roles,
-        [constants.ROLES.GROUP_CLAIM]: groups,
-        'isAdmin': isAdmin,
-        'isSuperAdmin': isSuperAdmin,
-        [constants.USER_ID]: decodedAccessToken[constants.USER_ID],
-        serverId: SERVER_ID,
-        imageURL: imageURL,
-        userOrg: userOrg
-    };
-    req.session.regenerate((err) => {
-        if (err) {
-            logger.error('Session regeneration failed', { 
-                error: err.message, 
-                stack: err.stack,
-                operation: 'sessionRegeneration'
-            });
-            return done(err);
-        }
-        // Store the new user profile in the session
-        req.login(profile, (err) => {
-            if (err) {
-                logger.error('Login failed after session regeneration', { 
-                    error: err.message, 
-                    stack: err.stack,
-                    operation: 'loginAfterSessionRegen'
-                });
-                return done(err);
-            }
-            return done(null, profile);
-        });
-    });
-
-    logger.debug('Returning profile', { userId: profile.sub, organization: userOrg });
-
-    //return done(null, profile);
-});
-
-strategy.authorizationParams = function (options) {
-    const params = {};
-    if (options.prompt) {
-        params.prompt = options.prompt;
-    }
-    if (options.fidp) {
-        params.fidp = options.fidp;
-    }
-    if (options.username) {
-        params.username = options.username;
-    }
-    return params;
-};
-
-passport.use(strategy);
-} // end if (config.identityProvider?.clientId)
-
-// Serialize user into the session
-passport.serializeUser((user, done) => {
-    logger.debug('Serializing user', { userId: user.sub });
-    const profile = {
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        imageURL: user.imageURL,
-        view: user.view,
-        idToken: user.idToken,
-        [constants.ROLES.ORGANIZATION_CLAIM]: user[constants.ROLES.ORGANIZATION_CLAIM],
-        'returnTo': user.returnTo,
-        accessToken: user.accessToken,
-        refreshToken: user.refreshToken,
-        'exchangeToken': user.exchangeToken,
-        'authorizedOrgs': user.authorizedOrgs,
-        [constants.ROLES.ROLE_CLAIM]: user.roles,
-        [constants.ROLES.GROUP_CLAIM]: user.groups,
-        'isAdmin': user.isAdmin,
-        'isSuperAdmin': user.isSuperAdmin,
-        [constants.USER_ID]: user[constants.USER_ID],
-        'userOrg': user.userOrg,
-        'isLocalAuth': user.isLocalAuth || false,
-    };
-    lock.acquire('serialize', (release) => {
-        release(null, profile);
-    }, (err, ret) => {
-        if (err) {
-            return done(err);
-        }
-        done(null, ret);
-    });
-    //done(null, user);
-});
-
-// Deserialize user from the session
-passport.deserializeUser(async (sessionData, done) => {
-    //return done(null, sessionData);
-    lock.acquire('deserialize', async (release) => {
-        try {
-            release(null, sessionData);
-        } catch (err) {
-            release(err);
-        }
-    }, (err, ret) => {
-        if (err) {
-            return done(err);
-        }
-        done(null, ret);
-    });
-});
-
-// passport.deserializeUser((obj, done) => {
-//     done(null, obj)
-// });
+configurePassport(SERVER_ID);
 
 app.use(constants.ROUTE.TECHNICAL_STYLES, express.static(path.join(require.main.filename, '../styles')));
 app.use(constants.ROUTE.TECHNICAL_SCRIPTS, express.static(path.join(require.main.filename, '../scripts')));
