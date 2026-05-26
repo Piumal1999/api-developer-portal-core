@@ -248,4 +248,5 @@ secrets:
   dbSecret: ""                          # Database password
   apiKeySecret: ""                      # API key secret
   billingKeyEncryptionKey: ""           # 64-char hex key for AES-256-GCM billing encryption
+  keyManagerEncryptionKey: ""           # 64-char hex key for AES-256-GCM key manager credential encryption
   azureInsightsConnectionString: ""     # Azure Application Insights connection string
