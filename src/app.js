@@ -22,9 +22,6 @@ const passport = require('passport');
 const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
 const path = require('path');
-const http = require('http');
-const https = require('https');
-const fs = require('fs');
 const logger = require('./config/logger');
 const { auditMiddleware } = require('./middlewares/auditLogger');
 const authRoute = require('./routes/authRoute');
@@ -32,8 +29,6 @@ const devportalRoute = require('./routes/devportalRoute');
 const orgContent = require('./routes/orgContentRoute');
 const apiContent = require('./routes/apiContentRoute');
 const applicationContent = require('./routes/applicationsContentRoute');
-const webhookDispatcher = require('./services/webhooks/dispatcher');
-const webhookDeliveryWorker = require('./services/webhooks/deliveryWorker');
 const customContent = require('./routes/customPageRoute');
 const subscriptionsContent = require('./routes/subscriptionsContentRoute');
 const mcpRegistryRoute = require('./routes/mcpRegistryRoute');
@@ -205,101 +200,5 @@ app.use( (err, req, res, next) => {
 });
 
 
-const seedDefaultData = require('./startup/seedDefaultData');
+module.exports = app;
 
-const PORT = process.env.PORT || config.defaultPort;
-if (config.advanced.http) {
-    http.createServer(app).listen(PORT, '0.0.0.0', () => {
-        logStartupInfo();
-        if (config.seedDefaults) {
-            seedDefaultData().catch(err => logger.error('seedDefaultData failed', { error: err.message }));
-        }
-    });
-
-} else {
-    try {
-        const certPath = path.resolve(config.serverCerts.pathToCert);
-        const keyPath = path.resolve(config.serverCerts.pathToPK);
-
-        const serverCert = fs.readFileSync(certPath);
-        const serverKey = fs.readFileSync(keyPath);
-        const caCert = fs.readFileSync(path.resolve(config.serverCerts.pathToCA));
-
-        https.createServer({
-            key: serverKey,
-            cert: serverCert,
-            ca: caCert,
-            requestCert: true,
-            rejectUnauthorized: false,
-        }, app).listen(PORT, () => {
-            logStartupInfo();
-            if (config.seedDefaults) {
-                seedDefaultData().catch(err => logger.error('seedDefaultData failed', { error: err.message }));
-            }
-        });
-
-    } catch (err) {
-        logger.error('Error setting up HTTPS server', { 
-            error: err.message, 
-            stack: err.stack,
-            operation: 'httpsServerSetup'
-        });
-    }
-}
-
-const logStartupInfo = () => {
-    logger.info(`Developer Portal V2 is running on port ${PORT}`);
-    logger.info(`Mode: ${config.mode}`);
-
-    if (config.mode === constants.DEV_MODE) {
-        logger.info('⚠️  Since you are in DEV mode, ensure default content is available at configured pathToContent ' + 
-            'and mock folder must exist in root directory');
-    }
-
-    const visitUrl = config.baseUrl + (config.mode === constants.DEV_MODE ? "/views/default" : "/<organization>/views/default");
-    logger.info(`Visit ${visitUrl}`);
-
-    // Start webhook outbox workers
-    try {
-        webhookDispatcher.start();
-        webhookDeliveryWorker.start();
-        logger.info('Webhook dispatcher and delivery worker started');
-    } catch (error) {
-        logger.warn('Could not start webhook workers', {
-            error: error.message,
-            stack: error.stack
-        });
-    }
-};
-
-// Handle Uncaught Exceptions
-process.on('uncaughtException', (err) => {
-    logger.error('Uncaught Exception - Application will exit', { 
-        error: err.message, 
-        stack: err.stack,
-        type: 'uncaughtException'
-    });
-});
-
-// Handle Unhandled Rejections
-process.on('unhandledRejection', (reason, promise) => {
-    logger.error('Unhandled Promise Rejection - Application will exit', { 
-        reason: reason?.message || reason, 
-        promise: promise?.toString(),
-        type: 'unhandledRejection'
-    });
-});
-
-// Graceful shutdown handlers
-const gracefulShutdown = (signal) => {
-    logger.info('Graceful shutdown initiated...', { 
-        signal,
-        message: `Received ${signal}. Gracefully shutting down...`
-    });
-    
-    logger.info('Application shutdown complete');
-    process.exit(0);
-};
-
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
